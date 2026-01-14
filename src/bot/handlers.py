@@ -40,6 +40,7 @@ from src.utils.formatting import (
     format_info_message,
     escape_markdown,
 )
+from src.mcp_server.tools import add_pending_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -73,18 +74,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     welcome_message = """
 🚀 *Antigravity Mobile Command*
 
-Welcome to your remote Mission Control for coding!
+Your remote Mission Control for coding!
 
-*Available Commands:*
-• `/prompt <text>` - Send a coding task
-• `/status` - Check current execution status
-• `/cancel` - Cancel the current operation
-• `/help` - Show this help message
+*Setup:*
+1️⃣ `/setproject ~/path/to/project`
+2️⃣ `/prompt Your coding task here`
+3️⃣ Open `~/telegram_tasks.md` in Antigravity
 
-*Quick Tips:*
-• Reply to screenshots with feedback
-• Use inline buttons for quick approvals
-• Send text messages as direct instructions
+*Commands:*
+• `/setproject <path>` - Set working project
+• `/prompt <task>` - Send a coding task
+• `/screenshot` - Request a screenshot
+• `/status` - Check status
+• `/cancel` - Cancel operation
+
+*How it works:*
+Tasks are written to `~/telegram_tasks.md`
+→ Open in Antigravity to auto-execute!
 
 Your chat ID: `{chat_id}`
 """.format(chat_id=chat_id)
@@ -120,23 +126,36 @@ async def prompt_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     prompt_text = " ".join(context.args)
     
-    # Send acknowledgment
-    status_msg = await update.message.reply_text("⏳ Processing your request...")
+    # Get current project context
+    project = get_current_project()
     
-    # Store the status message for later updates
-    queue = get_message_queue()
-    queue.set_status_message(update.effective_chat.id, status_msg.message_id)
+    if not project:
+        await update.message.reply_text(
+            "⚠️ *No project set!*\n\n"
+            "First set your project:\n"
+            "`/setproject /path/to/your/project`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
     
-    # Queue the prompt for the agent
-    message = QueueMessage(
-        type=MessageType.PROMPT,
-        priority=Priority.HIGH,
-        content=prompt_text,
-        data={"chat_id": update.effective_chat.id},
+    # Write to task file for Antigravity to pick up
+    from src.utils.task_file import write_task
+    task_file = write_task(prompt_text, project, update.effective_chat.id)
+    
+    # Also store in memory for MCP retrieval
+    add_pending_prompt(prompt_text, project, update.effective_chat.id)
+    
+    # Send sleek confirmation
+    await update.message.reply_text(
+        f"🚀 *Task Sent!*\n\n"
+        f"📝 _{prompt_text[:80]}{'...' if len(prompt_text) > 80 else ''}_\n"
+        f"📁 `{project}`\n\n"
+        f"📄 Written to: `~/telegram_tasks.md`\n\n"
+        f"*Open this file in Antigravity to auto-execute!*",
+        parse_mode=ParseMode.MARKDOWN,
     )
-    await queue.send_to_agent(message)
     
-    logger.info(f"Prompt received from chat {update.effective_chat.id}: {prompt_text[:50]}...")
+    logger.info(f"Task written to {task_file}: {prompt_text[:50]}...")
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -180,7 +199,159 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Clear status message
     queue.clear_status_message()
     
-    await update.message.reply_text("🛑 Cancellation requested.")
+    # Clear task file
+    from src.utils.task_file import clear_tasks
+    clear_tasks()
+    
+    await update.message.reply_text("🛑 Task cancelled and cleared.")
+
+
+async def screenshot_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /screenshot command to request a screenshot."""
+    if not update.effective_chat or not update.message:
+        return
+    
+    if not is_authorized(update.effective_chat.id):
+        await update.message.reply_text("⛔ Unauthorized")
+        return
+    
+    project = get_current_project()
+    
+    if not project:
+        await update.message.reply_text(
+            "⚠️ *No project set!*\n\n"
+            "First set your project:\n"
+            "`/setproject /path/to/your/project`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    
+    # Optional URL from args
+    url = " ".join(context.args) if context.args else "http://localhost:3000"
+    
+    # Write screenshot request to task file
+    from src.utils.task_file import write_task
+    screenshot_prompt = f"Take a screenshot of the current UI at {url} and send it to me via Telegram using send_artifact."
+    task_file = write_task(screenshot_prompt, project, update.effective_chat.id)
+    
+    await update.message.reply_text(
+        f"📸 *Screenshot Requested!*\n\n"
+        f"URL: `{url}`\n"
+        f"📄 Written to: `~/telegram_tasks.md`\n\n"
+        f"Open in Antigravity to capture!",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+# Store current project path
+_current_project: Optional[str] = None
+
+
+def get_current_project() -> Optional[str]:
+    """Get the currently set project path."""
+    return _current_project
+
+
+async def setproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /setproject command to set the working project."""
+    global _current_project
+    
+    if not update.effective_chat or not update.message:
+        return
+    
+    if not is_authorized(update.effective_chat.id):
+        await update.message.reply_text("⛔ Unauthorized")
+        return
+    
+    if not context.args:
+        if _current_project:
+            await update.message.reply_text(
+                f"📁 *Current Project:*\n`{_current_project}`\n\n"
+                "To change: `/setproject /path/to/project`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            await update.message.reply_text(
+                "❌ No project set.\n\n"
+                "Usage: `/setproject /path/to/your/project`\n\n"
+                "Example:\n`/setproject /Users/bhuvan_ade/my-app`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        return
+    
+    project_path = " ".join(context.args)
+    
+    # Expand ~ to home directory
+    if project_path.startswith("~"):
+        project_path = str(Path(project_path).expanduser())
+    
+    # Validate path exists
+    if not Path(project_path).exists():
+        await update.message.reply_text(
+            f"❌ Path does not exist: `{project_path}`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    
+    _current_project = project_path
+    
+    await update.message.reply_text(
+        f"✅ *Project set!*\n\n"
+        f"📁 `{project_path}`\n\n"
+        "All prompts will now work in this context.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    
+    # Notify the queue/agent about the project change
+    queue = get_message_queue()
+    message = QueueMessage(
+        type=MessageType.USER_MESSAGE,
+        priority=Priority.HIGH,
+        content=f"Project context set to: {project_path}",
+        data={
+            "action": "set_project",
+            "project_path": project_path,
+            "chat_id": update.effective_chat.id,
+        },
+    )
+    await queue.send_to_agent(message)
+
+
+async def projects_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /projects command to list recent projects."""
+    if not update.effective_chat or not update.message:
+        return
+    
+    if not is_authorized(update.effective_chat.id):
+        await update.message.reply_text("⛔ Unauthorized")
+        return
+    
+    # Common project locations to check
+    home = Path.home()
+    common_paths = [
+        home / "antigravity-telegram",
+        home / "liveintent-panel",
+        home / "projects",
+        home / "code",
+        home / "dev",
+    ]
+    
+    existing = [p for p in common_paths if p.exists()]
+    
+    if existing:
+        projects_list = "\n".join([f"• `{p}`" for p in existing[:10]])
+        message = (
+            "📂 *Found Projects:*\n\n"
+            f"{projects_list}\n\n"
+            "Set one with: `/setproject <path>`"
+        )
+    else:
+        message = (
+            "No common project folders found.\n\n"
+            "Set your project: `/setproject /path/to/project`"
+        )
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 
 # ===== Callback Query Handlers =====
@@ -570,6 +741,9 @@ def setup_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("prompt", prompt_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
+    app.add_handler(CommandHandler("screenshot", screenshot_command))
+    app.add_handler(CommandHandler("setproject", setproject_command))
+    app.add_handler(CommandHandler("projects", projects_command))
     
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(

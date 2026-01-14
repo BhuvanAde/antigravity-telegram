@@ -180,6 +180,24 @@ TOOLS: list[Tool] = [
             "required": ["prompt"],
         },
     ),
+    Tool(
+        name="get_pending_prompts",
+        description=(
+            "Check for pending prompts from the Telegram user. "
+            "Call this when the user asks you to check telegram or at the start of a session. "
+            "Returns any queued prompts that the user sent via the Telegram bot."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "clear_after_read": {
+                    "type": "boolean",
+                    "description": "Whether to clear prompts after reading (default: true)",
+                    "default": True,
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -223,6 +241,9 @@ async def handle_tool_call(
         
         elif tool_name == "await_user_response":
             return await _handle_await_response(arguments, chat_id, queue)
+        
+        elif tool_name == "get_pending_prompts":
+            return await _handle_get_pending_prompts(arguments)
         
         else:
             return f"Unknown tool: {tool_name}"
@@ -451,3 +472,53 @@ async def _handle_await_response(
         return "No response received (timed out)"
     except asyncio.TimeoutError:
         return "Request timed out waiting for user response"
+
+
+# ===== Pending Prompts Storage =====
+
+_pending_prompts: list[dict[str, Any]] = []
+
+
+def add_pending_prompt(prompt: str, project_path: Optional[str] = None, chat_id: Optional[int] = None) -> None:
+    """Add a prompt to the pending queue."""
+    from datetime import datetime
+    _pending_prompts.append({
+        "prompt": prompt,
+        "project_path": project_path,
+        "chat_id": chat_id,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+def get_pending_prompts_list() -> list[dict[str, Any]]:
+    """Get all pending prompts without clearing."""
+    return list(_pending_prompts)
+
+
+def clear_pending_prompts() -> None:
+    """Clear all pending prompts."""
+    _pending_prompts.clear()
+
+
+async def _handle_get_pending_prompts(arguments: dict[str, Any]) -> str:
+    """Handle get_pending_prompts tool."""
+    clear_after = arguments.get("clear_after_read", True)
+    
+    if not _pending_prompts:
+        return "No pending prompts from Telegram."
+    
+    # Format prompts for output
+    result_lines = [f"Found {len(_pending_prompts)} pending prompt(s) from Telegram:\n"]
+    
+    for i, p in enumerate(_pending_prompts, 1):
+        project_info = f" (Project: {p['project_path']})" if p.get('project_path') else ""
+        result_lines.append(f"{i}. {p['prompt']}{project_info}")
+        result_lines.append(f"   Received: {p['timestamp']}")
+        result_lines.append("")
+    
+    if clear_after:
+        clear_pending_prompts()
+        result_lines.append("(Prompts cleared from queue)")
+    
+    return "\n".join(result_lines)
+
