@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "telegram-bridge": {
+      "command": "python",
+      "args": ["-m", "src.main", "--mode", "mcp"],
+      "cwd": "/path/to/antigravity-telegram",
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "YOUR_BOT_TOKEN_HERE",
+        "AUTHORIZED_CHAT_IDS": "YOUR_CHAT_ID_HERE",
+        "ARTIFACTS_PATH": "~/.gemini/antigravity/artifacts"
+      }
+    }
+  }
+}
