@@ -138,24 +138,28 @@ async def prompt_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
     
-    # Write to task file for Antigravity to pick up
-    from src.utils.task_file import write_task
-    task_file = write_task(prompt_text, project, update.effective_chat.id)
+    # Write to task file for Antigravity to pick up (auto-opens the file)
+    from src.utils.task_file import write_task, copy_to_clipboard
+    task_file = write_task(prompt_text, project, update.effective_chat.id, auto_open=True)
+    
+    # Copy prompt to clipboard for easy pasting
+    copy_to_clipboard(prompt_text)
     
     # Also store in memory for MCP retrieval
     add_pending_prompt(prompt_text, project, update.effective_chat.id)
     
     # Send sleek confirmation
     await update.message.reply_text(
-        f"🚀 *Task Sent!*\n\n"
+        f"🚀 *Task Sent & File Opened!*\n\n"
         f"📝 _{prompt_text[:80]}{'...' if len(prompt_text) > 80 else ''}_\n"
         f"📁 `{project}`\n\n"
-        f"📄 Written to: `~/telegram_tasks.md`\n\n"
-        f"*Open this file in Antigravity to auto-execute!*",
+        f"✅ File auto-opened on your computer\n"
+        f"📋 Prompt copied to clipboard\n\n"
+        f"*Paste it into Antigravity to execute!*",
         parse_mode=ParseMode.MARKDOWN,
     )
     
-    logger.info(f"Task written to {task_file}: {prompt_text[:50]}...")
+    logger.info(f"Task written and file opened: {task_file}")
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

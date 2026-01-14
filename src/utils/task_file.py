@@ -3,6 +3,7 @@ File-based task injection for seamless Telegram → Antigravity flow.
 """
 
 import os
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -25,6 +26,7 @@ def write_task(
     project_path: Optional[str] = None,
     chat_id: Optional[int] = None,
     append: bool = False,
+    auto_open: bool = True,
 ) -> Path:
     """
     Write a task to the task file for Antigravity to pick up.
@@ -34,6 +36,7 @@ def write_task(
         project_path: Optional project path context
         chat_id: Telegram chat ID for responses
         append: If True, append to existing tasks; otherwise overwrite
+        auto_open: If True, open the file after writing
         
     Returns:
         Path to the task file
@@ -84,7 +87,57 @@ This file contains tasks sent from Telegram. Antigravity should process these au
     with open(task_file, mode) as f:
         f.write(task_content)
     
+    # Auto-open the file
+    if auto_open:
+        open_task_file(task_file)
+    
     return task_file
+
+
+def open_task_file(task_file: Optional[Path] = None) -> bool:
+    """
+    Open the task file in the default application.
+    
+    Args:
+        task_file: Path to open, defaults to the standard task file
+        
+    Returns:
+        True if opened successfully
+    """
+    if task_file is None:
+        task_file = get_task_file_path()
+    
+    if not task_file.exists():
+        return False
+    
+    try:
+        # macOS: open with default app
+        subprocess.run(["open", str(task_file)], check=True)
+        return True
+    except Exception:
+        return False
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """
+    Copy text to system clipboard (macOS).
+    
+    Args:
+        text: Text to copy
+        
+    Returns:
+        True if copied successfully
+    """
+    try:
+        process = subprocess.Popen(
+            ['pbcopy'],
+            stdin=subprocess.PIPE,
+            text=True
+        )
+        process.communicate(input=text)
+        return process.returncode == 0
+    except Exception:
+        return False
 
 
 def clear_tasks() -> None:
