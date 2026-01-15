@@ -21,6 +21,10 @@ class Config:
     artifacts_path: Path = field(default_factory=lambda: Path.home() / ".gemini" / "antigravity" / "artifacts")
     workspace_path: Path = field(default_factory=lambda: Path.home())
     
+    # Task Watcher
+    task_file_name: str = "telegram_tasks.md"
+    task_watch_path: Path = field(default_factory=lambda: Path("/Users/bhuvan_ade"))
+    
     # MCP settings
     mcp_server_name: str = "telegram-bridge"
     log_level: str = "INFO"
@@ -50,6 +54,10 @@ class Config:
         workspace_path_str = os.getenv("WORKSPACE_PATH", "~/")
         workspace_path = Path(workspace_path_str).expanduser()
         
+        task_file_name = os.getenv("TASK_FILE_NAME", "telegram_tasks.md")
+        task_watch_path_str = os.getenv("TASK_WATCH_PATH", "/Users/bhuvan_ade")
+        task_watch_path = Path(task_watch_path_str).expanduser()
+        
         return cls(
             bot_token=bot_token,
             authorized_chat_ids=chat_ids,
@@ -57,6 +65,8 @@ class Config:
             workspace_path=workspace_path,
             mcp_server_name=os.getenv("MCP_SERVER_NAME", "telegram-bridge"),
             log_level=os.getenv("MCP_LOG_LEVEL", "INFO"),
+            task_file_name=task_file_name,
+            task_watch_path=task_watch_path,
         )
     
     def ensure_directories(self) -> None:

@@ -267,10 +267,15 @@ async def setproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("⛔ Unauthorized")
         return
     
+    # Import ProjectManager for shared context
+    from src.utils.project_manager import get_project_manager
+    pm = get_project_manager()
+    
     if not context.args:
-        if _current_project:
+        current = pm.get_current_path() or _current_project
+        if current:
             await update.message.reply_text(
-                f"📁 *Current Project:*\n`{_current_project}`\n\n"
+                f"📁 *Current Project:*\n`{current}`\n\n"
                 "To change: `/setproject /path/to/project`",
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -297,12 +302,15 @@ async def setproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
     
+    # Set in both local state and ProjectManager (for MCP sync)
     _current_project = project_path
+    project = pm.set_current_project(project_path)
     
     await update.message.reply_text(
         f"✅ *Project set!*\n\n"
-        f"📁 `{project_path}`\n\n"
-        "All prompts will now work in this context.",
+        f"📁 `{project.path}`\n"
+        f"📛 Name: {project.name}\n\n"
+        "All prompts and MCP tools will now work in this context.",
         parse_mode=ParseMode.MARKDOWN,
     )
     

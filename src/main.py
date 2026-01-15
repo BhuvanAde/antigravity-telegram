@@ -32,6 +32,7 @@ from src.bot.message_queue import (
 from src.mcp_server.server import TelegramBridgeServer
 from src.mcp_server.state import get_state_manager
 from src.monitors.artifacts import create_artifact_watcher
+from src.monitors.tasks import create_task_watcher
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +54,7 @@ class AntigravityMobileCommand:
         self.telegram_app: Optional[Application] = None
         self.mcp_server: Optional[TelegramBridgeServer] = None
         self.artifact_watcher = None
+        self.task_watcher = None
         
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -81,7 +83,50 @@ class AntigravityMobileCommand:
             self._handle_new_artifact,
         )
         
+        # Set up task watcher
+        self.task_watcher = await create_task_watcher(
+            self.config.task_watch_path,
+            self.config.task_file_name,
+        )
+        
+        # Start background reply monitor
+        asyncio.create_task(self._monitor_replies())
+        
         logger.info("Setup complete")
+        
+    async def _monitor_replies(self) -> None:
+        """Monitor for replies from the Agent process."""
+        import json
+        from pathlib import Path
+        
+        replies_file = Path.home() / ".antigravity_replies.json"
+        
+        while True:
+            try:
+                if replies_file.exists():
+                    content = replies_file.read_text()
+                    if content.strip():
+                        replies = json.loads(content)
+                        
+                        if replies:
+                            # clear file first to prevent duplicate sends if crash
+                            replies_file.write_text("[]")
+                            
+                            for reply in replies:
+                                chat_id = reply.get("chat_id")
+                                text = reply.get("content")
+                                if chat_id and text and self.telegram_app:
+                                    try:
+                                        await self.telegram_app.bot.send_message(
+                                            chat_id=chat_id,
+                                            text=text
+                                        )
+                                    except Exception as e:
+                                        logger.error(f"Failed to send reply: {e}")
+            except Exception as e:
+                logger.error(f"Error in reply monitor: {e}")
+            
+            await asyncio.sleep(1.0)
     
     async def _handle_telegram_message(self, message: QueueMessage) -> None:
         """Handle messages destined for Telegram."""
@@ -249,6 +294,9 @@ class AntigravityMobileCommand:
         
         if self.artifact_watcher:
             await self.artifact_watcher.stop()
+            
+        if self.task_watcher:
+            await self.task_watcher.stop()
         
         # Cancel pending approvals
         state = get_state_manager()
